@@ -8901,6 +8901,12 @@ def _issue_auth_code_redirect(client_id, pool_id, redirect_uri, scope, username,
     pkce_error = _pkce_error_redirect(redirect_uri, code_challenge, code_challenge_method, state)
     if pkce_error:
         return pkce_error
+    user = (_user_pools.get(pool_id) or {}).get("_users", {}).get(username)
+    if user:
+        try:
+            _apply_postauth_trigger(pool_id, client_id, user, None)
+        except (_PreTokenRejected, _PreTokenUnavailable, _PostAuthenticationInvalid) as e:
+            return _hosted_error_page(str(e))
     code = _generate_auth_code()
     _authorization_codes[code] = {
         "client_id": client_id,

@@ -15312,3 +15312,32 @@ def test_cognito_postauth_not_returning_the_event_fails_sign_in(cognito_idp, lam
         cognito_idp.initiate_auth(ClientId=cid, AuthFlow="USER_PASSWORD_AUTH",
                                   AuthParameters={"USERNAME": "u", "PASSWORD": "Pwd1234!"})
     assert exc.value.response["Error"]["Code"] == "InvalidLambdaResponseException"
+
+
+@pytest.mark.parametrize("handler, signed_in", [
+    ("def handler(event, ctx):\n    return event\n", True),
+    ("def handler(event, ctx):\n    raise RuntimeError('boom')\n", False),
+])
+def test_cognito_postauth_runs_on_hosted_ui_sign_in(cognito_idp, lam, handler, signed_in):
+    """A Hosted UI password sign-in invokes PostAuthentication before the authorization code is issued."""
+    fn_arn = _pretoken_lambda(lam, f"ministack-postauth-hosted-{signed_in}".lower(), handler)
+    pid = cognito_idp.create_user_pool(
+        PoolName="postauth-hosted", LambdaConfig={"PostAuthentication": fn_arn})["UserPool"]["Id"]
+    try:
+        cid = cognito_idp.create_user_pool_client(
+            UserPoolId=pid, ClientName="hosted", GenerateSecret=False, AllowedOAuthFlows=["code"],
+            AllowedOAuthScopes=["openid"], AllowedOAuthFlowsUserPoolClient=True,
+            CallbackURLs=["http://localhost:3000/callback"])["UserPoolClient"]["ClientId"]
+        cognito_idp.admin_create_user(UserPoolId=pid, Username="testuser", TemporaryPassword="TempPass1!",
+                                      MessageAction="SUPPRESS")
+        cognito_idp.admin_set_user_password(UserPoolId=pid, Username="testuser", Password="TestPass1!",
+                                            Permanent=True)
+        status, headers, body = _hosted_sign_in(cid)
+    finally:
+        cognito_idp.delete_user_pool(UserPoolId=pid)
+    if signed_in:
+        assert status == 302
+        assert "code=" in headers["location"]
+    else:
+        assert status == 400
+        assert "PostAuthentication failed with error boom." in body.decode()
