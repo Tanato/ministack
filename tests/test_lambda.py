@@ -9079,6 +9079,52 @@ exports.handler = (event, ctx, cb) => {{
     assert received.get("body") == "test"
 
 
+def test_nodejs_worker_resolves_localhost_names_to_loopback():
+    """RFC 6761: `*.localhost` names resolve to loopback, so fetch and http reach a vhost under them."""
+    from http.server import ThreadingHTTPServer
+
+    seen = []
+
+    class _Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            seen.append((self.path, self.headers.get("Host")))
+            self.send_response(200)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def log_message(self, *args):
+            pass
+
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
+    port = srv.server_address[1]
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+
+    handler_js = f"""\
+const http = require("http");
+const dns = require("dns");
+const host = "abc123.appsync-api.us-east-1.localhost:{port}";
+exports.handler = async () => ({{
+  address: await new Promise((resolve) => dns.lookup("abc123.appsync-api.us-east-1.localhost",
+    (err, address) => resolve(err ? err.code : address))),
+  fetch: await fetch(`http://${{host}}/fetch`).then((res) => res.status, (e) => String(e.cause || e)),
+  http: await new Promise((resolve) => http.get(`http://${{host}}/http`, (res) => {{
+    res.resume();
+    resolve(res.statusCode);
+  }}).on("error", (e) => resolve(e.code))),
+}});
+"""
+    try:
+        result = _run_nodejs_worker(handler_js)
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+    assert result.get("status") == "ok", f"Handler failed: {result}"
+    assert result["result"] == {"address": "127.0.0.1", "fetch": 200, "http": 200}
+    host = f"abc123.appsync-api.us-east-1.localhost:{port}"
+    assert sorted(seen) == [("/fetch", host), ("/http", host)]
+
+
 @pytest.mark.parametrize("use_ssl", [False, True], ids=["plain", "use_ssl"])
 def test_nodejs_worker_https_call_forms_reach_the_gateway(tmp_path, use_ssl):
     """Every https.request/https.get form and the SDK stubs reach the gateway, over TLS when its endpoint is https."""
