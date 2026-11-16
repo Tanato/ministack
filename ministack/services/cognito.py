@@ -8198,9 +8198,10 @@ def _binds_resource(pool, headers):
 def handle_oauth2_authorize(method, path, headers, query_params):
     """GET /oauth2/authorize — if identity_provider is given, redirect to external IdP;
     otherwise show managed login form."""
-    # Federation redirect (SAML / OIDC external IdP)
+    # Federation redirect (SAML / OIDC external IdP). `COGNITO` names the user
+    # pool's own sign-in, which the managed login form below serves.
     identity_provider = _qp(query_params, "identity_provider")
-    if identity_provider:
+    if identity_provider and identity_provider != "COGNITO":
         return _oauth2_authorize_federation(query_params)
 
     # Managed login UI

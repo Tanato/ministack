@@ -4412,7 +4412,10 @@ def _post_form(url, data, headers=None, follow_redirects=True):
 # Tests — /oauth2/authorize
 # ---------------------------------------------------------------------------
 
-def test_oauth2_authorize_shows_login_form():
+@pytest.mark.parametrize("identity_provider", ["", "&identity_provider=COGNITO"],
+                         ids=["no-provider", "cognito-provider"])
+def test_oauth2_authorize_shows_login_form(identity_provider):
+    """AWS docs "Authorize endpoint": identity_provider=COGNITO names the user pool's own sign-in."""
     cognito_idp = make_client('cognito-idp')
     pool_id, client = _setup_pool_with_user(cognito_idp)
     client_id = client['ClientId']
@@ -4421,7 +4424,7 @@ def test_oauth2_authorize_shows_login_form():
            f'&client_id={client_id}'
            f'&redirect_uri=http://localhost:3000/callback'
            f'&scope=openid+email'
-           f'&state=abc123')
+           f'&state=abc123{identity_provider}')
     status, headers, body = _get(url)
     html = body.decode('utf-8')
 
