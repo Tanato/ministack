@@ -1063,6 +1063,24 @@ def test_eventbridge_tags_v2(eb):
     assert any(t["Key"] == "team" for t in tags2)
 
 
+def test_eventbridge_tags_rule_on_partner_event_bus(eb):
+    """A rule on a partner event bus, whose name has slashes, is tagged through its ARN."""
+    source = f"aws.partner/saas.example/{_uuid_mod.uuid4().hex[:8]}"
+    eb.create_partner_event_source(Name=source, Account="000000000000")
+    try:
+        eb.create_event_bus(Name=source, EventSourceName=source)
+        arn = eb.put_rule(Name="partner-rule", EventBusName=source,
+                          EventPattern=json.dumps({"source": [source]}))["RuleArn"]
+        eb.tag_resource(ResourceARN=arn, Tags=[{"Key": "stage", "Value": "local"}])
+        tags = eb.list_tags_for_resource(ResourceARN=arn)["Tags"]
+        eb.delete_rule(Name="partner-rule", EventBusName=source)
+        eb.delete_event_bus(Name=source)
+    finally:
+        eb.delete_partner_event_source(Name=source, Account="000000000000")
+    assert arn.endswith(f":rule/{source}/partner-rule")
+    assert tags == [{"Key": "stage", "Value": "local"}]
+
+
 @pytest.mark.parametrize(
     ("arn", "code"),
     [
