@@ -632,6 +632,22 @@ def test_publish_follows_the_authorization_modes_contract(auth_enabled, iam_user
     assert [answer[0] if answer[0] == 200 else answer for answer in answers] == expected
 
 
+def test_namespace_without_modes_takes_each_api_default(appsync):
+    """A namespace created without publishAuthModes or subscribeAuthModes takes the API's
+    defaultPublishAuthModes for publishing and defaultSubscribeAuthModes for subscribing."""
+    modes = lambda *types: [{"authType": t} for t in types]  # noqa: E731
+    api_id = appsync.create_api(name=f"events-defaults-{int(time.time() * 1000)}", eventConfig={
+        "authProviders": modes("AWS_IAM", "API_KEY"), "connectionAuthModes": modes("API_KEY"),
+        "defaultPublishAuthModes": modes("AWS_IAM"), "defaultSubscribeAuthModes": modes("API_KEY"),
+    })["api"]["apiId"]
+    try:
+        namespace = _create_namespace(appsync, api_id, "inherited")
+    finally:
+        appsync.delete_api(apiId=api_id)
+    assert namespace["publishAuthModes"] == modes("AWS_IAM")
+    assert namespace["subscribeAuthModes"] == modes("API_KEY")
+
+
 @pytest.mark.parametrize("payload, status, error_type, message", [
     (b"{not json", 400, "SerializationException", "Unable to parse request body"),
     (b'{"channel": "default/a", "events": "x"}', 400, "SerializationException", "Expected list or null"),

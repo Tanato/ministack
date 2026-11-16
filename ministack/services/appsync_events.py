@@ -834,10 +834,10 @@ def _create_channel_namespace(api_id, body):
         )
 
     now = _now()
-    default_modes = _apis[api_id]["eventConfig"]["defaultPublishAuthModes"]
+    event_config = _apis[api_id]["eventConfig"]
     namespaces[name] = {
-        "publishAuthModes": data.get("publishAuthModes") or default_modes,
-        "subscribeAuthModes": data.get("subscribeAuthModes") or default_modes,
+        "publishAuthModes": data.get("publishAuthModes") or event_config["defaultPublishAuthModes"],
+        "subscribeAuthModes": data.get("subscribeAuthModes") or event_config["defaultSubscribeAuthModes"],
         "codeHandlers": data.get("codeHandlers"),
         "handlerConfigs": data.get("handlerConfigs"),
         "tags": data.get("tags", {}),
