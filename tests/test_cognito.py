@@ -15314,12 +15314,21 @@ def test_cognito_postauth_not_returning_the_event_fails_sign_in(cognito_idp, lam
     assert exc.value.response["Error"]["Code"] == "InvalidLambdaResponseException"
 
 
+_POSTAUTH_CALLS_BACK = (
+    "import os, urllib.request\n"
+    "def handler(event, ctx):\n"
+    "    urllib.request.urlopen(os.environ['AWS_ENDPOINT_URL'] + '/_ministack/health', timeout=10).read()\n"
+    "    return event\n"
+)
+
+
 @pytest.mark.parametrize("handler, signed_in", [
-    ("def handler(event, ctx):\n    return event\n", True),
+    (_POSTAUTH_CALLS_BACK, True),
     ("def handler(event, ctx):\n    raise RuntimeError('boom')\n", False),
 ])
 def test_cognito_postauth_runs_on_hosted_ui_sign_in(cognito_idp, lam, handler, signed_in):
-    """A Hosted UI password sign-in invokes PostAuthentication before the authorization code is issued."""
+    """A Hosted UI password sign-in invokes PostAuthentication before the authorization code is
+    issued, and the trigger can call back into the emulator while the sign-in waits for it."""
     fn_arn = _pretoken_lambda(lam, f"ministack-postauth-hosted-{signed_in}".lower(), handler)
     pid = cognito_idp.create_user_pool(
         PoolName="postauth-hosted", LambdaConfig={"PostAuthentication": fn_arn})["UserPool"]["Id"]
