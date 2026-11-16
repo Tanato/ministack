@@ -135,6 +135,33 @@ def test_account_region_scoped_dict_isolates_account_and_region():
         set_request_region(original_region)
 
 
+def test_save_state_flushes_the_file_and_the_rename_to_disk(monkeypatch, tmp_path):
+    """State is saved at shutdown; without fsync a host that stops right after keeps an empty file."""
+    import os
+
+    from ministack.core import persistence
+
+    monkeypatch.setattr(persistence, "PERSIST_STATE", True)
+    monkeypatch.setattr(persistence, "STATE_DIR", str(tmp_path))
+    events = []
+    real_fsync, real_replace = persistence.os.fsync, persistence.os.replace
+
+    def fsync(fd):
+        events.append(("fsync", os.path.basename(os.readlink(f"/proc/self/fd/{fd}"))))
+        real_fsync(fd)
+
+    def replace(src, dst):
+        events.append(("replace", os.path.basename(dst)))
+        real_replace(src, dst)
+
+    monkeypatch.setattr(persistence.os, "fsync", fsync)
+    monkeypatch.setattr(persistence.os, "replace", replace)
+    persistence.save_state("flushed", {"key": "value"})
+
+    assert events == [("fsync", "flushed.json.tmp"), ("replace", "flushed.json"), ("fsync", tmp_path.name)]
+    assert persistence.load_state("flushed") == {"key": "value"}
+
+
 def test_account_region_scoped_dict_persistence_round_trip(monkeypatch, tmp_path):
     """Account+region scoped stores must survive the JSON persistence path."""
     from ministack.core.responses import (
