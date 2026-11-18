@@ -378,6 +378,18 @@ const http = require("http");
 const https = require("https");
 const url = require("url");
 const Module = require("module");
+const dns = require("dns");
+
+// RFC 6761 section 6.3: localhost names resolve to loopback. musl and glibc
+// leave `*.localhost` unresolved, so a handler could not reach the endpoints
+// MiniStack advertises under it (e.g. `<api>.appsync-api.<region>.localhost`).
+const _origDnsLookup = dns.lookup;
+dns.lookup = function(hostname, options, callback) {
+  if (typeof hostname === "string" && hostname.toLowerCase().endsWith(".localhost")) {
+    return _origDnsLookup.call(dns, "127.0.0.1", options, callback);
+  }
+  return _origDnsLookup.apply(dns, arguments);
+};
 
 // Redirect stdout to stderr so stdout stays clean for JSON-line protocol
 const fs = require("fs");
