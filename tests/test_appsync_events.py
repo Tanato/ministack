@@ -307,7 +307,7 @@ def _event_host_request(api_id, method, path, body: bytes):
     return resp.status, resp.headers, json.loads(data) if data else None
 
 
-def _open_subscriber(api_id, *, auth_header: dict | None = None):
+def _open_subscriber(api_id, *, auth_header: dict | None = None, host_header: str | None = None):
     """Open a realtime WebSocket with the spec-shaped subprotocol list.
 
     Sends ``Sec-WebSocket-Protocol: header-<b64>, aws-appsync-event-ws`` and
@@ -315,7 +315,7 @@ def _open_subscriber(api_id, *, auth_header: dict | None = None):
     ``{"host":..., "x-api-key": <the API's key>}`` payload is supplied —
     matching how a real client would wrap API_KEY credentials.
     """
-    host_header = f"{api_id}.appsync-realtime-api.us-east-1.amazonaws.com"
+    host_header = host_header or f"{api_id}.appsync-realtime-api.us-east-1.amazonaws.com"
     http_host = f"{api_id}.appsync-api.us-east-1.amazonaws.com"
     if auth_header is None:
         auth_header = {"host": http_host, "x-api-key": _API_KEYS.get(api_id, "da2-local-test-key")}
@@ -938,6 +938,22 @@ def test_websocket_subscribe_receives_published_event(api):
         assert json.loads(data["event"]) == {"text": "hi"}
     finally:
         ws.close()
+
+
+def test_websocket_on_the_advertised_http_host_receives_published_event(api, appsync):
+    """Amplify opens `/event/realtime` on the HTTP endpoint's host when it is not an amazonaws.com
+    name, as on an Event API custom domain, so MiniStack's advertised HTTP host serves it too."""
+    http_host = appsync.get_api(apiId=api)["api"]["dns"]["HTTP"]
+    ws = _open_subscriber(api, host_header=http_host)
+    try:
+        assert _subscribe(ws, "sub-1", "/default/room1") == {"type": "subscribe_success", "id": "sub-1"}
+        time.sleep(0.05)
+        status, _ = _publish_http(api, "/default/room1", [json.dumps({"text": "hi"})])
+        data = _drain_until(ws, lambda f: f.get("type") == "data")
+    finally:
+        ws.close()
+    assert status == 200
+    assert json.loads(data["event"]) == {"text": "hi"}
 
 
 def test_websocket_single_level_wildcard(api):
