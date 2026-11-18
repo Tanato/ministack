@@ -1348,6 +1348,54 @@ def test_apigw_v2_event_omits_null_fields_when_absent(apigw, lam):
         lam.delete_function(FunctionName=fname)
 
 
+def test_apigw_v2_event_request_context_domain_prefix(apigw, lam):
+    """AWS documentation, "Create AWS Lambda proxy integrations for HTTP APIs in API Gateway": the
+    payload 2.0 requestContext carries domainPrefix, the first label of domainName. AWS Lambda
+    Powertools' APIGatewayProxyEventV2Schema requires it, so its parser rejected every event."""
+    import urllib.request as _urlreq
+    import uuid as _uuid
+
+    fname = f"intg-domainprefix-{_uuid.uuid4().hex[:8]}"
+    code = (
+        "import json\n"
+        "def handler(event, context):\n"
+        "    request_context = event['requestContext']\n"
+        "    return {'statusCode': 200, 'body': json.dumps({\n"
+        "        'domainName': request_context.get('domainName'),\n"
+        "        'domainPrefix': request_context.get('domainPrefix'),\n"
+        "    })}\n"
+    )
+    lam.create_function(
+        FunctionName=fname,
+        Runtime="python3.12",
+        Role=_LAMBDA_ROLE,
+        Handler="index.handler",
+        Code={"ZipFile": _make_zip(code)},
+    )
+    api_id = apigw.create_api(Name=f"domainprefix-api-{fname}", ProtocolType="HTTP")["ApiId"]
+    int_id = apigw.create_integration(
+        ApiId=api_id,
+        IntegrationType="AWS_PROXY",
+        IntegrationUri=f"arn:aws:lambda:us-east-1:000000000000:function:{fname}",
+        PayloadFormatVersion="2.0",
+    )["IntegrationId"]
+    apigw.create_route(ApiId=api_id, RouteKey="GET /prefix", Target=f"integrations/{int_id}")
+    apigw.create_stage(ApiId=api_id, StageName="$default")
+
+    try:
+        url = f"http://{api_id}.execute-api.localhost:{_EXECUTE_PORT}/$default/prefix"
+        req = _urlreq.Request(url, method="GET")
+        req.add_header("Host", f"{api_id}.execute-api.localhost:{_EXECUTE_PORT}")
+        resp = _urlreq.urlopen(req)
+        assert resp.status == 200
+        body = json.loads(resp.read())
+        assert body["domainPrefix"] == api_id
+        assert body["domainName"].split(".")[0] == body["domainPrefix"]
+    finally:
+        apigw.delete_api(ApiId=api_id)
+        lam.delete_function(FunctionName=fname)
+
+
 def test_http_api_response_request_id_header(apigw, lam):
     """AWS: observed 2026-09-07, us-east-1, an HTTP API's integration responses: apigw-requestid
     (e.g. Ct26qjlpoAMEbVg=) and no x-amzn-requestid or x-amz-request-id. AWS Knowledge Center

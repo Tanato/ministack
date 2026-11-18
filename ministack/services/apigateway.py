@@ -1111,6 +1111,7 @@ async def _authorize_request_v2(
                 "accountId": owner_account_id,
                 "apiId": api_id,
                 "domainName": f"{api_id}.execute-api.{_HOST}",
+                "domainPrefix": api_id,
                 "http": {
                     "method": method,
                     "path": path,
@@ -1686,6 +1687,7 @@ async def _invoke_lambda_proxy(
             "accountId": get_account_id(),
             "apiId": api_id,
             "domainName": f"{api_id}.execute-api.{_HOST}",
+            "domainPrefix": api_id,
             "http": {
                 "method": method,
                 "path": path,
