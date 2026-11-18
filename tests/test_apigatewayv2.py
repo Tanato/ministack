@@ -1349,9 +1349,9 @@ def test_apigw_v2_event_omits_null_fields_when_absent(apigw, lam):
 
 
 def test_apigw_v2_event_request_context_domain_prefix(apigw, lam):
-    """AWS docs "Working with AWS Lambda proxy integrations for HTTP APIs": the payload 2.0
-    requestContext carries domainPrefix, the first label of domainName. AWS Lambda Powertools'
-    APIGatewayProxyEventV2Schema requires it, so its parser rejected every MiniStack event."""
+    """AWS documentation, "Create AWS Lambda proxy integrations for HTTP APIs in API Gateway": the
+    payload 2.0 requestContext carries domainPrefix, the first label of domainName. AWS Lambda
+    Powertools' APIGatewayProxyEventV2Schema requires it, so its parser rejected every event."""
     import urllib.request as _urlreq
     import uuid as _uuid
 
