@@ -221,7 +221,7 @@ _NON_S3_VHOST_NAMES = frozenset(
 )
 
 from ministack.core import container_reaper
-from ministack.core.concurrency import spawn_background
+from ministack.core.concurrency import run_reentrant, spawn_background
 from ministack.core.hypercorn_compat import install as _install_hypercorn_compat
 from ministack.core.iam_evaluator import (
     AmbiguousAccessKeyError,
@@ -1524,7 +1524,9 @@ def _handle_transfer_sftp_ports_request(method: str, path: str):
 async def _handle_cognito_body_request(method: str, path: str, headers: dict, body: bytes, query_params: dict):
     """Handle Cognito routes that require the parsed request body."""
     if path in ("/oauth2/login", "/login") and method == "POST":
-        return _get_module("cognito").handle_login_submit(method, path, headers, body, query_params)
+        # A sign-in can invoke trigger Lambdas that call back into this server.
+        return await run_reentrant(_get_module("cognito").handle_login_submit, method, path, headers, body,
+                                   query_params, thread_name="ministack-cognito-trigger")
     if path == "/oauth2/token" and method == "POST":
         return await _get_module("cognito").handle_oauth2_token(method, path, headers, body, query_params)
     if path in _COGNITO_USERINFO_PATHS and method == "POST":
