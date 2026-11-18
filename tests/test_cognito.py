@@ -4415,7 +4415,8 @@ def _post_form(url, data, headers=None, follow_redirects=True):
 @pytest.mark.parametrize("identity_provider", ["", "&identity_provider=COGNITO"],
                          ids=["no-provider", "cognito-provider"])
 def test_oauth2_authorize_shows_login_form(identity_provider):
-    """AWS docs "Authorize endpoint": identity_provider=COGNITO names the user pool's own sign-in."""
+    """AWS documentation, "The redirect and authorization endpoint": "For Amazon Cognito user pools,
+    use the value COGNITO" for identity_provider; it opens the user pool's own sign-in."""
     cognito_idp = make_client('cognito-idp')
     pool_id, client = _setup_pool_with_user(cognito_idp)
     client_id = client['ClientId']
