@@ -648,6 +648,29 @@ def test_namespace_without_modes_takes_each_api_default(appsync):
     assert namespace["subscribeAuthModes"] == modes("API_KEY")
 
 
+@pytest.mark.auth_contract
+def test_subscribe_to_a_namespace_without_modes_follows_the_subscribe_default(auth_enabled, appsync):
+    """With IAM as the publish default and API_KEY as the subscribe default, an API-key subscriber
+    reaches a namespace that sets no modes of its own, under AUTH=true as well as without it."""
+    modes = lambda *types: [{"authType": t} for t in types]  # noqa: E731
+    api_id = appsync.create_api(name=f"events-subdefault-{int(time.time() * 1000)}", eventConfig={
+        "authProviders": modes("API_KEY", "AWS_IAM"), "connectionAuthModes": modes("API_KEY"),
+        "defaultPublishAuthModes": modes("AWS_IAM"), "defaultSubscribeAuthModes": modes("API_KEY"),
+    })["api"]["apiId"]
+    try:
+        _create_namespace(appsync, api_id, "inherited")
+        _API_KEYS[api_id] = appsync.create_api_key(apiId=api_id)["apiKey"]["id"]
+        ws = _open_subscriber(api_id)
+        try:
+            outcome = _subscribe(ws, "sub-1", "/inherited/room")
+        finally:
+            ws.close()
+    finally:
+        _API_KEYS.pop(api_id, None)
+        appsync.delete_api(apiId=api_id)
+    assert outcome == {"type": "subscribe_success", "id": "sub-1"}
+
+
 @pytest.mark.parametrize("payload, status, error_type, message", [
     (b"{not json", 400, "SerializationException", "Unable to parse request body"),
     (b'{"channel": "default/a", "events": "x"}', 400, "SerializationException", "Expected list or null"),
