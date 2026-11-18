@@ -450,8 +450,11 @@ def _operation_auth_modes(api_id: str, channel: str | None, operation: str) -> s
     if operation == EVENT_CONNECT:
         modes = ((_apis.get(api_id) or {}).get("eventConfig") or {}).get("connectionAuthModes")
     else:
+        publishing = operation == EVENT_PUBLISH
         namespace = _channel_namespaces.get(api_id, {}).get(_channel_namespace_for(channel or "")) or {}
-        modes = namespace.get("publishAuthModes" if operation == EVENT_PUBLISH else "subscribeAuthModes")
+        modes = namespace.get("publishAuthModes" if publishing else "subscribeAuthModes") or (
+            ((_apis.get(api_id) or {}).get("eventConfig") or {}).get(
+                "defaultPublishAuthModes" if publishing else "defaultSubscribeAuthModes"))
     return {mode.get("authType") for mode in modes or [] if isinstance(mode, dict)}
 
 
@@ -834,10 +837,10 @@ def _create_channel_namespace(api_id, body):
         )
 
     now = _now()
-    default_modes = _apis[api_id]["eventConfig"]["defaultPublishAuthModes"]
     namespaces[name] = {
-        "publishAuthModes": data.get("publishAuthModes") or default_modes,
-        "subscribeAuthModes": data.get("subscribeAuthModes") or default_modes,
+        # Omitted modes stay empty, as AWS reports them; authorization falls back to the API's defaults.
+        "publishAuthModes": data.get("publishAuthModes") or [],
+        "subscribeAuthModes": data.get("subscribeAuthModes") or [],
         "codeHandlers": data.get("codeHandlers"),
         "handlerConfigs": data.get("handlerConfigs"),
         "tags": data.get("tags", {}),

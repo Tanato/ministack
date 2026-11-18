@@ -537,8 +537,8 @@ def test_api_key_crud_via_v1_path(appsync, api):
 def test_channel_namespace_crud(appsync, api):
     ns = appsync.create_channel_namespace(apiId=api, name="chat")["channelNamespace"]
     assert ns["name"] == "chat"
-    assert ns["publishAuthModes"]
-    assert ns["subscribeAuthModes"]
+    assert ns["publishAuthModes"] == []
+    assert ns["subscribeAuthModes"] == []
 
     fetched = appsync.get_channel_namespace(apiId=api, name="chat")["channelNamespace"]
     assert fetched["name"] == "chat"
@@ -630,6 +630,48 @@ def test_publish_follows_the_authorization_modes_contract(auth_enabled, iam_user
                              "message": "You are not authorized to make this call."}]}
     expected = [(401, refused), (401, wrong_key), 200, (401, refused), 200] if auth_enabled else [200] * 5
     assert [answer[0] if answer[0] == 200 else answer for answer in answers] == expected
+
+
+def test_namespace_without_modes_reports_them_empty(appsync):
+    """AWS: observed 2026-11-17, us-east-1, GetChannelNamespace on a namespace created without modes, in an
+    API whose defaults are AWS_IAM (publish) and AMAZON_COGNITO_USER_POOLS (subscribe), answered
+    "publishAuthModes": [] and "subscribeAuthModes": []."""
+    modes = lambda *types: [{"authType": t} for t in types]  # noqa: E731
+    api_id = appsync.create_api(name=f"events-defaults-{int(time.time() * 1000)}", eventConfig={
+        "authProviders": modes("AWS_IAM", "API_KEY"), "connectionAuthModes": modes("API_KEY"),
+        "defaultPublishAuthModes": modes("AWS_IAM"), "defaultSubscribeAuthModes": modes("API_KEY"),
+    })["api"]["apiId"]
+    try:
+        created = _create_namespace(appsync, api_id, "inherited")
+        fetched = appsync.get_channel_namespace(apiId=api_id, name="inherited")["channelNamespace"]
+    finally:
+        appsync.delete_api(apiId=api_id)
+    for namespace in (created, fetched):
+        assert namespace["publishAuthModes"] == []
+        assert namespace["subscribeAuthModes"] == []
+
+
+@pytest.mark.auth_contract
+def test_subscribe_to_a_namespace_without_modes_follows_the_subscribe_default(auth_enabled, appsync):
+    """With IAM as the publish default and API_KEY as the subscribe default, an API-key subscriber
+    reaches a namespace that sets no modes of its own, under AUTH=true as well as without it."""
+    modes = lambda *types: [{"authType": t} for t in types]  # noqa: E731
+    api_id = appsync.create_api(name=f"events-subdefault-{int(time.time() * 1000)}", eventConfig={
+        "authProviders": modes("API_KEY", "AWS_IAM"), "connectionAuthModes": modes("API_KEY"),
+        "defaultPublishAuthModes": modes("AWS_IAM"), "defaultSubscribeAuthModes": modes("API_KEY"),
+    })["api"]["apiId"]
+    try:
+        _create_namespace(appsync, api_id, "inherited")
+        _API_KEYS[api_id] = appsync.create_api_key(apiId=api_id)["apiKey"]["id"]
+        ws = _open_subscriber(api_id)
+        try:
+            outcome = _subscribe(ws, "sub-1", "/inherited/room")
+        finally:
+            ws.close()
+    finally:
+        _API_KEYS.pop(api_id, None)
+        appsync.delete_api(apiId=api_id)
+    assert outcome == {"type": "subscribe_success", "id": "sub-1"}
 
 
 @pytest.mark.parametrize("payload, status, error_type, message", [
