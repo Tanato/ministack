@@ -8812,7 +8812,9 @@ def _handle_hosted_mfa_submit(mfa_token, form):
             return again("Your software token has already been used once.")
         user["_totp_used_step"] = step
         _mfa_reset(user)
-    del _pending_hosted_mfa[mfa_token]
+    # Claim the session atomically: /login runs reentrantly, so a concurrent submission may have taken it.
+    if _pending_hosted_mfa.pop(mfa_token, None) is not session:
+        return _oauth2_error("invalid_request", "Session has expired. Please sign in again.")
     return _issue_auth_code_redirect(
         session["client_id"], session["pool_id"], session["redirect_uri"], session["scope"], user["Username"],
         session["nonce"], session["code_challenge"], session["code_challenge_method"], session["state"],
@@ -9229,11 +9231,12 @@ def _handle_new_password_submit(np_token, form):
         _pending_new_password.pop(np_token, None)
         return err
 
+    # Claim the session atomically: /login runs reentrantly, so a concurrent submission may have taken it.
+    if _pending_new_password.pop(np_token, None) is not session:
+        return _oauth2_error("invalid_request", "Session has expired. Please sign in again.")
     user["_password"] = new_password
     user["UserStatus"] = "CONFIRMED"
     user["UserLastModifiedDate"] = _now_epoch()
-
-    del _pending_new_password[np_token]
 
     return _finish_password_sign_in(pool, session["pool_id"], user, session)
 

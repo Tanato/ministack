@@ -15056,6 +15056,71 @@ def test_hosted_ui_mfa_session_lasts_the_clients_auth_session_validity(monkeypat
     assert status == 302 and headers["Location"] == f"/oauth2/authorize?{_urlencode(oauth)}"
 
 
+def _hosted_pool_in_process(monkeypatch, name, **pool):
+    mod, call = _idp_in_process(monkeypatch, auth=False)
+    pid = call("CreateUserPool", PoolName=name, **pool)["UserPool"]["Id"]
+    cid = call("CreateUserPoolClient", UserPoolId=pid, ClientName="hosted", AllowedOAuthFlows=["code"],
+               AllowedOAuthScopes=["openid"], AllowedOAuthFlowsUserPoolClient=True,
+               CallbackURLs=["http://localhost:3000/callback"],
+               ExplicitAuthFlows=["ALLOW_USER_PASSWORD_AUTH"])["UserPoolClient"]["ClientId"]
+    oauth = _hosted_oauth(cid)
+
+    def submit(**form):
+        return mod.handle_login_submit("POST", "/login", {}, _urlencode({**oauth, **form}).encode(), {})
+
+    return mod, call, pid, cid, submit
+
+
+def _submit_twice_concurrently(monkeypatch, mod, hook_name, submit, form):
+    """Run a second, identical submission inside the first one, between its session read and its claim."""
+    inner = {}
+    original = getattr(mod, hook_name)
+
+    def hook(*args, **kwargs):
+        if "started" not in inner:
+            inner["started"] = True
+            inner["answer"] = submit(**form)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(mod, hook_name, hook)
+    outer = submit(**form)
+    return inner["answer"], outer
+
+
+def test_hosted_ui_new_password_session_is_claimed_once(monkeypatch):
+    """/login runs reentrantly, so two submissions of one new-password session can overlap: one signs in."""
+    mod, call, pid, _cid, submit = _hosted_pool_in_process(monkeypatch, "HostedNewPasswordRacePool")
+    monkeypatch.setattr(mod, "_pending_new_password", {})
+    call("AdminCreateUser", UserPoolId=pid, Username="tim", TemporaryPassword="TempPass1!", MessageAction="SUPPRESS")
+    _status, _h, body = submit(username="tim", password="TempPass1!")
+    np_token = _hidden(body.decode(), "np_token")
+    form = {"np_token": np_token, "new_password": "NewPass1!", "confirm_password": "NewPass1!"}
+
+    inner, outer = _submit_twice_concurrently(monkeypatch, mod, "_password_policy_errors", submit, form)
+
+    assert inner[0] == 302 and "code=" in inner[1]["Location"]
+    assert outer[0] == 400 and json.loads(outer[2])["error"] == "invalid_request"
+
+
+def test_hosted_ui_mfa_enrolment_session_is_claimed_once(monkeypatch):
+    """Two overlapping submissions of one TOTP enrolment, which has no replay check, issue one code."""
+    mod, call, pid, _cid, submit = _hosted_pool_in_process(monkeypatch, "HostedMfaRacePool", MfaConfiguration="ON")
+    monkeypatch.setattr(mod, "_pending_hosted_mfa", {})
+    call("SetUserPoolMfaConfig", UserPoolId=pid, MfaConfiguration="ON",
+         SoftwareTokenMfaConfiguration={"Enabled": True})
+    call("AdminCreateUser", UserPoolId=pid, Username="tim", MessageAction="SUPPRESS")
+    call("AdminSetUserPassword", UserPoolId=pid, Username="tim", Password="TestPass1!", Permanent=True)
+    _status, _h, body = submit(username="tim", password="TestPass1!")
+    mfa_token = _hidden(body.decode(), "mfa_token")
+    code = mod._totp_code(mod._pending_hosted_mfa[mfa_token]["secret"])
+    form = {"mfa_token": mfa_token, "userCode": code}
+
+    inner, outer = _submit_twice_concurrently(monkeypatch, mod, "_totp_matches", submit, form)
+
+    assert inner[0] == 302 and "code=" in inner[1]["Location"]
+    assert outer[0] == 400 and json.loads(outer[2])["error"] == "invalid_request"
+
+
 def test_hosted_ui_sends_sms_users_the_sms_code_page(cognito_idp):
     sms = {"SmsConfiguration": {"SnsCallerArn": "arn:aws:iam::000000000000:role/sms", "ExternalId": "x"}}
     pool_id, client = _setup_pool_with_user(cognito_idp, generate_secret=False, mfa_configuration="OPTIONAL")
