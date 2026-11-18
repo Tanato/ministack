@@ -3984,12 +3984,17 @@ def _list_partner_event_source_accounts(data):
 
 
 def _list_event_sources(data):
-    """The partner event sources shared with the caller's account in this region."""
+    """The partner event sources shared with the caller's account in this region.
+
+    A source is ACTIVE once the account has created its partner event bus (which
+    takes the source's name), and PENDING until then.
+    """
     prefix = data.get("NamePrefix", "")
     account, region = get_account_id(), get_region()
     results = [
-        {"Arn": rec["EventSourceArn"], "CreatedBy": owner, "Name": rec["Name"], "State": "ACTIVE"}
-        for (owner, owner_region, _key), rec in list(_partner_event_sources._data.items())
+        {"Arn": rec["EventSourceArn"], "Name": rec["Name"],
+         "State": "ACTIVE" if rec["Name"] in _event_buses else "PENDING"}
+        for (_owner, owner_region, _key), rec in list(_partner_event_sources._data.items())
         if owner_region == region and rec["Account"] == account and rec["Name"].startswith(prefix)
     ]
     return _offset_page(data, "EventSources", results)

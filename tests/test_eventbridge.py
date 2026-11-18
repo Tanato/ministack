@@ -1230,18 +1230,25 @@ def test_eventbridge_endpoints_and_partner_stubs(eb):
 
 
 def test_eventbridge_list_event_sources_shows_sources_shared_with_the_account(eb):
-    """ListEventSources answers with the partner event sources created for the caller's account."""
+    """ListEventSources answers with the partner event sources created for the caller's account,
+    PENDING until the account creates the source's partner event bus and ACTIVE after (API
+    Reference, EventSource.State)."""
     suffix = _uuid_mod.uuid4().hex[:8]
     mine = f"aws.partner/saas.example/{suffix}/mine"
     other = f"aws.partner/saas.example/{suffix}/other"
+    prefix = f"aws.partner/saas.example/{suffix}/"
     arn = eb.create_partner_event_source(Name=mine, Account="000000000000")["EventSourceArn"]
     eb.create_partner_event_source(Name=other, Account="111111111111")
     try:
-        listed = eb.list_event_sources(NamePrefix=f"aws.partner/saas.example/{suffix}/")["EventSources"]
+        pending = eb.list_event_sources(NamePrefix=prefix)["EventSources"]
+        eb.create_event_bus(Name=mine, EventSourceName=mine)
+        active = eb.list_event_sources(NamePrefix=prefix)["EventSources"]
+        eb.delete_event_bus(Name=mine)
     finally:
         eb.delete_partner_event_source(Name=mine, Account="000000000000")
         eb.delete_partner_event_source(Name=other, Account="111111111111")
-    assert [(source["Name"], source["Arn"], source["State"]) for source in listed] == [(mine, arn, "ACTIVE")]
+    assert [(source["Name"], source["Arn"], source["State"]) for source in pending] == [(mine, arn, "PENDING")]
+    assert [source["State"] for source in active] == ["ACTIVE"]
 
 
 def test_eventbridge_replay_lifecycle(eb):
