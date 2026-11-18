@@ -141,6 +141,20 @@ def _json_object_hook(obj):
     return obj
 
 
+def _fsync_directory(path: str) -> None:
+    """Flush a directory entry change (a rename) to disk, where the platform allows it."""
+    try:
+        fd = os.open(path, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
+
+
 def save_state(service: str, data: dict) -> None:
     if not PERSIST_STATE:
         return
@@ -154,7 +168,12 @@ def save_state(service: str, data: dict) -> None:
                     {"__ministack_format__": _state_format_version(service), "payload": data},
                     f, default=_json_default,
                 )
+                # Flush before the rename: state is saved at shutdown, and a host that stops right
+                # after (a container runtime's VM, a laptop) otherwise keeps the rename but not the data.
+                f.flush()
+                os.fsync(f.fileno())
             os.replace(tmp, path)
+            _fsync_directory(STATE_DIR)
         except BaseException:
             # Clean up temp file on any failure to avoid stale partial writes
             try:
