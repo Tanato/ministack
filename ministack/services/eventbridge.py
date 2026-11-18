@@ -3938,6 +3938,7 @@ def _create_partner_event_source(data):
         "Name": name,
         "Account": account,
         "EventSourceArn": arn,
+        "CreationTime": _now_ts(),
     }
     return json_response({"EventSourceArn": arn})
 
@@ -3986,17 +3987,26 @@ def _list_partner_event_source_accounts(data):
 def _list_event_sources(data):
     """The partner event sources shared with the caller's account in this region.
 
-    A source is ACTIVE once the account has created its partner event bus (which
-    takes the source's name), and PENDING until then.
+    As AWS answers it: an ARN with no account, the partner (``aws.partner/<partner>``) as
+    ``CreatedBy``, and ACTIVE once the account has created the source's partner event bus,
+    which takes the source's name, PENDING until then.
     """
     prefix = data.get("NamePrefix", "")
     account, region = get_account_id(), get_region()
-    results = [
-        {"Arn": rec["EventSourceArn"], "Name": rec["Name"],
-         "State": "ACTIVE" if rec["Name"] in _event_buses else "PENDING"}
-        for (_owner, owner_region, _key), rec in list(_partner_event_sources._data.items())
-        if owner_region == region and rec["Account"] == account and rec["Name"].startswith(prefix)
-    ]
+    results = []
+    for (_owner, owner_region, _key), rec in list(_partner_event_sources._data.items()):
+        name = rec["Name"]
+        if owner_region != region or rec["Account"] != account or not name.startswith(prefix):
+            continue
+        source = {
+            "Arn": f"arn:aws:events:{region}::event-source/{name}",
+            "CreatedBy": "/".join(name.split("/")[:2]),
+            "Name": name,
+            "State": "ACTIVE" if name in _event_buses else "PENDING",
+        }
+        if "CreationTime" in rec:
+            source["CreationTime"] = rec["CreationTime"]
+        results.append(source)
     return _offset_page(data, "EventSources", results)
 
 
