@@ -735,7 +735,19 @@ async def _resolve_jwks_url(authorizer: dict) -> str | None:
     return discovered or f"{issuer}/.well-known/jwks.json"
 
 
+def _local_cognito_jwks_pool(url: str) -> str | None:
+    """The pool whose JWKS URL `_resolve_jwks_url` built on this gateway, or None."""
+    match = re.fullmatch(rf"http://{re.escape(_HOST)}:{_PORT}/([^/]+)/\.well-known/jwks\.json", url)
+    return match.group(1) if match else None
+
+
 async def _fetch_jwks(url: str) -> dict:
+    pool_id = _local_cognito_jwks_pool(url)
+    if pool_id:
+        # Read in-process: under USE_SSL the gateway serves only HTTPS, so a plain HTTP call to itself fails.
+        from ministack.services import cognito
+
+        return json.loads(cognito.well_known_jwks(pool_id)[2])
     cached = _jwks_cache.get(url)
     now = time.time()
     if cached and cached.get("expiresAt", 0) > now:

@@ -2288,6 +2288,23 @@ def test_apigw_resolve_jwks_url_cognito_skips_discovery(monkeypatch):
     assert called["hit"] is False
 
 
+def test_apigw_cognito_jwks_read_without_calling_the_gateway(monkeypatch):
+    """A local Cognito pool's keys are read in-process, so a TLS-only gateway (USE_SSL) still verifies tokens."""
+    import asyncio
+
+    from ministack.services import apigateway as apigw_mod
+    from ministack.services import cognito as cognito_mod
+
+    async def _refuse(_request_or_url, _timeout_seconds):
+        raise OSError("plain HTTP to a TLS-only gateway")
+
+    monkeypatch.setattr(apigw_mod, "_urlopen_async", _refuse)
+    issuer = "https://cognito-idp.us-east-1.amazonaws.com/us-east-1_pool123"
+    url = asyncio.run(apigw_mod._resolve_jwks_url({"jwtConfiguration": {"Issuer": issuer}}))
+
+    assert asyncio.run(apigw_mod._fetch_jwks(url)) == json.loads(cognito_mod.well_known_jwks("us-east-1_pool123")[2])
+
+
 def test_apigw_http_proxy_does_not_block_parallel_ddb(monkeypatch):
     import asyncio
 
