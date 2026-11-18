@@ -8813,7 +8813,9 @@ def _handle_hosted_mfa_submit(mfa_token, form):
             return again("Your software token has already been used once.")
         user["_totp_used_step"] = step
         _mfa_reset(user)
-    del _pending_hosted_mfa[mfa_token]
+    # Claim the session atomically: /login runs reentrantly, so a concurrent submission may have taken it.
+    if _pending_hosted_mfa.pop(mfa_token, None) is not session:
+        return _oauth2_error("invalid_request", "Session has expired. Please sign in again.")
     return _issue_auth_code_redirect(
         session["client_id"], session["pool_id"], session["redirect_uri"], session["scope"], user["Username"],
         session["nonce"], session["code_challenge"], session["code_challenge_method"], session["state"],
@@ -8896,12 +8898,19 @@ def _handle_confirm_forgot_password_submit(form):
 def _issue_auth_code_redirect(client_id, pool_id, redirect_uri, scope, username, nonce,
                                code_challenge, code_challenge_method, state, resource=""):
     """Mint an authorization code and build the 302 redirect response for the Hosted UI."""
-    client = _find_pool_by_client_id(client_id)[2] or {}
+    _, pool, client = _find_pool_by_client_id(client_id)
+    client = client or {}
     if redirect_uri not in client.get("CallbackURLs", []):
         return _oauth2_error("invalid_request", f"redirect_uri is not allowed: {redirect_uri}")
     pkce_error = _pkce_error_redirect(redirect_uri, code_challenge, code_challenge_method, state)
     if pkce_error:
         return pkce_error
+    user = (pool or {}).get("_users", {}).get(username)
+    if user:
+        try:
+            _apply_postauth_trigger(pool_id, client_id, user, None)
+        except (_PreTokenRejected, _PreTokenUnavailable, _PostAuthenticationInvalid) as e:
+            return _hosted_error_page(str(e))
     code = _generate_auth_code()
     _authorization_codes[code] = {
         "client_id": client_id,
@@ -9223,11 +9232,12 @@ def _handle_new_password_submit(np_token, form):
         _pending_new_password.pop(np_token, None)
         return err
 
+    # Claim the session atomically: /login runs reentrantly, so a concurrent submission may have taken it.
+    if _pending_new_password.pop(np_token, None) is not session:
+        return _oauth2_error("invalid_request", "Session has expired. Please sign in again.")
     user["_password"] = new_password
     user["UserStatus"] = "CONFIRMED"
     user["UserLastModifiedDate"] = _now_epoch()
-
-    del _pending_new_password[np_token]
 
     return _finish_password_sign_in(pool, session["pool_id"], user, session)
 
