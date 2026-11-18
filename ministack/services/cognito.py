@@ -8895,13 +8895,14 @@ def _handle_confirm_forgot_password_submit(form):
 def _issue_auth_code_redirect(client_id, pool_id, redirect_uri, scope, username, nonce,
                                code_challenge, code_challenge_method, state, resource=""):
     """Mint an authorization code and build the 302 redirect response for the Hosted UI."""
-    client = _find_pool_by_client_id(client_id)[2] or {}
+    _, pool, client = _find_pool_by_client_id(client_id)
+    client = client or {}
     if redirect_uri not in client.get("CallbackURLs", []):
         return _oauth2_error("invalid_request", f"redirect_uri is not allowed: {redirect_uri}")
     pkce_error = _pkce_error_redirect(redirect_uri, code_challenge, code_challenge_method, state)
     if pkce_error:
         return pkce_error
-    user = (_user_pools.get(pool_id) or {}).get("_users", {}).get(username)
+    user = (pool or {}).get("_users", {}).get(username)
     if user:
         try:
             _apply_postauth_trigger(pool_id, client_id, user, None)
