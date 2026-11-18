@@ -61,6 +61,10 @@ _LAMBDA_URL_RE = re.compile(r"^([a-z0-9]{32}|[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9
 _AOSS_COLLECTION_HOST_RE = re.compile(r"^[a-z0-9]{3,40}\.[a-z0-9-]+\.aoss\.", re.IGNORECASE)
 # AppSync Events realtime WebSocket: {apiId}.appsync-realtime-api.<anything>[:port].
 _APPSYNC_REALTIME_RE = re.compile(r"^([a-z0-9]+)\.appsync-realtime-api\.")
+# AppSync Events HTTP host: {apiId}.appsync-api.<anything>[:port]. Amplify opens the
+# realtime WebSocket at its `/event/realtime` path for any host that is not an
+# `amazonaws.com` name, as AWS serves both on an Event API custom domain.
+_APPSYNC_EVENTS_HTTP_RE = re.compile(r"^([a-z0-9]+)\.appsync-api\.")
 # AppSync GraphQL data plane: POST /v1/apis/{apiId}/graphql.
 _APPSYNC_GRAPHQL_RE = re.compile(r"^/v1/apis/[^/]+/graphql$")
 # IoT data plane WebSocket: anything containing ".iot." in the host header.
@@ -3423,7 +3427,8 @@ async def app(scope, receive, send):
         ws_host = ws_headers.get("host", "")
         ws_path = scope.get("path", "")
         parsed = _parse_execute_api_url(ws_host, ws_path)
-        appsync_rt_m = _APPSYNC_REALTIME_RE.match(ws_host)
+        appsync_rt_m = _APPSYNC_REALTIME_RE.match(ws_host) or (
+            ws_path == "/event/realtime" and _APPSYNC_EVENTS_HTTP_RE.match(ws_host))
         iot_ws_m = _IOT_DATA_WS_RE.search(ws_host) and _ws_has_mqtt_subprotocol(ws_headers)
         if not parsed and not appsync_rt_m and not iot_ws_m:
             msg = await receive()
