@@ -991,13 +991,9 @@ def _resolve_taggable_events_arn(arn):
             record = _event_buses.get(name)
             exists = bool(record) and record.get("Arn") == arn
     elif resource.startswith("rule/"):
-        parts = resource.split("/")
-        if len(parts) == 2:
-            bus, rule = "default", parts[1]
-        elif len(parts) == 3:
-            _, bus, rule = parts
-        else:
-            bus, rule = "", ""
+        # Rule names have no "/", but partner bus names do (aws.partner/<partner>/<source>).
+        bus, _, rule = resource[len("rule/"):].rpartition("/")
+        bus = bus or "default"
         record = _rules.get(_rule_key(rule, bus)) if rule else None
         exists = bool(record) and record.get("Arn") == arn
     elif resource.startswith("archive/"):
