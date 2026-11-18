@@ -1229,6 +1229,32 @@ def test_eventbridge_endpoints_and_partner_stubs(eb):
     assert pe["FailedEntryCount"] == 0
 
 
+def test_eventbridge_list_event_sources_shows_sources_shared_with_the_account(eb):
+    """AWS: observed 2026-11-17, us-east-1, ListEventSources for a MongoDB Atlas trigger source whose bus
+    exists: Arn arn:aws:events:us-east-1::event-source/<name> (no account), CreatedBy
+    "aws.partner/mongodb.com", CreationTime, Name and State ACTIVE. PENDING until the bus exists
+    (API Reference, EventSource.State)."""
+    suffix = _uuid_mod.uuid4().hex[:8]
+    mine = f"aws.partner/saas.example/{suffix}/mine"
+    other = f"aws.partner/saas.example/{suffix}/other"
+    prefix = f"aws.partner/saas.example/{suffix}/"
+    eb.create_partner_event_source(Name=mine, Account="000000000000")
+    eb.create_partner_event_source(Name=other, Account="111111111111")
+    try:
+        pending = eb.list_event_sources(NamePrefix=prefix)["EventSources"]
+        eb.create_event_bus(Name=mine, EventSourceName=mine)
+        active = eb.list_event_sources(NamePrefix=prefix)["EventSources"]
+        eb.delete_event_bus(Name=mine)
+    finally:
+        eb.delete_partner_event_source(Name=mine, Account="000000000000")
+        eb.delete_partner_event_source(Name=other, Account="111111111111")
+    assert [source["Name"] for source in pending] == [mine]
+    assert pending[0]["Arn"] == f"arn:aws:events:us-east-1::event-source/{mine}"
+    assert pending[0]["CreatedBy"] == "aws.partner/saas.example"
+    assert pending[0]["State"] == "PENDING" and "CreationTime" in pending[0]
+    assert [source["State"] for source in active] == ["ACTIVE"]
+
+
 def test_eventbridge_replay_lifecycle(eb):
     arch = f"replay-arch-{_uuid_mod.uuid4().hex[:8]}"
     eb.create_archive(
