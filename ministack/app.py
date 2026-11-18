@@ -2448,6 +2448,11 @@ async def _handle_s3_vhost_request(host: str, path: str, method: str, headers: d
     bucket = _extract_s3_vhost_bucket(host)
     if not bucket or _S3_VHOST_EXCLUDE_RE.search(host) or bucket in _NON_S3_VHOST_NAMES:
         return None
+    # `<label>.<anything>.<MINISTACK_HOST>` also names CloudFront alternate domains; unless the
+    # bucket exists, leave such a host to the distribution that claims it.
+    if (_get_module("s3")._bucket_owner_account(bucket) is None
+            and _resolve_cloudfront_alias_request(host) is not None):
+        return None
     # An access point ARN is addressed as `<name>-<account>.<host>`, signed `s3` or unsigned.
     access_point_region = access_point_alias = None
     ap_match = _ACCESS_POINT_HOST_RE.match(bucket)

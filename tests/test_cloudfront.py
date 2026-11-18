@@ -5151,6 +5151,23 @@ def test_routes_by_alternate_domain_name(cloudfront, cf_backend):
     assert json.loads(body)["path"] == "/exact/hello"
 
 
+def test_alias_under_the_ministack_host_is_not_taken_for_a_bucket(cloudfront, cf_backend, s3):
+    # `<label>.<anything>.localhost` is also S3's virtual-hosted shape. An alias wins unless that bucket exists.
+    suffix = _uuid_mod.uuid4().hex[:8]
+    served, existing = f"docs-{suffix}", f"photos-{suffix}"
+    _alias_distribution(cloudfront, cf_backend["origin_domain"],
+                        [f"{served}.stage.localhost", f"{existing}.stage.localhost"], "/alias")
+    s3.create_bucket(Bucket=existing)
+    try:
+        status, headers, body = _get(f"{served}.stage.localhost", "/hello")
+        bucket_status, bucket_headers, _ = _get(f"{existing}.stage.localhost", "/hello")
+    finally:
+        s3.delete_bucket(Bucket=existing)
+    assert status == 200 and "X-Cache" in headers
+    assert json.loads(body)["path"] == "/alias/hello"
+    assert bucket_status == 404 and "X-Cache" not in bucket_headers
+
+
 def _served_by(host):
     return json.loads(_get(host, "/hello")[2])["path"]
 
