@@ -6028,7 +6028,9 @@ def _cloudfront_origin_allows(owner: str, bucket_name: str, key: str, source_arn
         action="s3:GetObject",
         resource_arn=f"arn:aws:s3:::{bucket_name}/{key}",
         region=get_region(),
-        service_context={"aws:sourcearn": source_arn} if source_arn else {},
+        # The distribution's ARN names its account (arn:aws:cloudfront::<account>:distribution/<id>).
+        service_context={"aws:sourcearn": source_arn, "aws:sourceaccount": source_arn.split(":")[4]}
+        if source_arn else {},
     )
     service = None if oai_id else "cloudfront.amazonaws.com"
     return evaluate_resource_policy(policy, ctx, service=service).decision == "Allow"

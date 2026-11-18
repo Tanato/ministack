@@ -5745,6 +5745,35 @@ def test_s3_origin_without_a_bucket_policy_grant_is_denied(cloudfront, s3):
     assert b"<Code>AccessDenied</Code>" in body
 
 
+def test_s3_origin_grant_conditioned_on_the_source_account(cloudfront, s3):
+    """An OAC fetch carries aws:SourceAccount, the distribution's account. AWS documentation, IAM global
+    condition keys: the key is in the request context when an AWS service principal calls on behalf of
+    a resource, and the calling service passes the account ID of the original resource."""
+    suffix = _uuid_mod.uuid4().hex[:10]
+    bucket = f"cf-dp-s3-account-{suffix}"
+    s3.create_bucket(Bucket=bucket)
+    s3.put_object(Bucket=bucket, Key="hello.txt", Body=b"by account")
+    dist = cloudfront.create_distribution(DistributionConfig={
+        "CallerReference": f"cf-dp-s3-account-{suffix}", "Comment": "", "Enabled": True,
+        "Origins": {"Quantity": 1, "Items": [{
+            "Id": "s3-origin", "DomainName": f"{bucket}.s3.amazonaws.com",
+            "S3OriginConfig": {"OriginAccessIdentity": ""}, "OriginAccessControlId": "test-oac-id",
+        }]},
+        "DefaultCacheBehavior": {"TargetOriginId": "s3-origin", "ViewerProtocolPolicy": "allow-all",
+                                 "CachePolicyId": _CACHING_DISABLED},
+    })["Distribution"]
+    account = dist["ARN"].split(":")[4]
+    s3.put_bucket_policy(Bucket=bucket, Policy=json.dumps({"Statement": [{
+        "Effect": "Allow", "Principal": {"Service": "cloudfront.amazonaws.com"},
+        "Action": "s3:GetObject", "Resource": f"arn:aws:s3:::{bucket}/*",
+        "Condition": {"StringLike": {"AWS:SourceArn": f"arn:aws:cloudfront::{account}:distribution/*"},
+                      "StringEquals": {"AWS:SourceAccount": account}},
+    }]}))
+    status, _headers, body = _get(dist["DomainName"], "/hello.txt")
+    assert status == 200
+    assert body == b"by account"
+
+
 def test_s3_origin_serves_bucket_object(cf_s3_stack):
     status, headers, body = _get(cf_s3_stack["dist_host"], "/hello.txt")
     assert status == 200
