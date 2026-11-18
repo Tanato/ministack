@@ -5746,7 +5746,9 @@ def test_s3_origin_without_a_bucket_policy_grant_is_denied(cloudfront, s3):
 
 
 def test_s3_origin_grant_conditioned_on_the_source_account(cloudfront, s3):
-    """An OAC fetch carries aws:SourceAccount, the distribution's account, as AWS's service principals do."""
+    """An OAC fetch carries aws:SourceAccount, the distribution's account. AWS documentation, IAM global
+    condition keys: the key is in the request context when an AWS service principal calls on behalf of
+    a resource, and the calling service passes the account ID of the original resource."""
     suffix = _uuid_mod.uuid4().hex[:10]
     bucket = f"cf-dp-s3-account-{suffix}"
     s3.create_bucket(Bucket=bucket)
